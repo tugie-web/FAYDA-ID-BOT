@@ -58,7 +58,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     message = (
         "Welcome to FAYDA ID BOT.\n\n"
         "Tap Start to begin. The next step will be FAN entry, followed by the OTP process.\n"
-        "Only enter your FAN after tapping Start. Your FAN and OTP are sensitive; the bot will try to delete your messages after receiving them."
+        "Only enter your FAN after tapping Start. Your FAN and OTP messages will remain visible in this chat. Keep this chat private."
     )
     if update.effective_message:
         await update.effective_message.reply_text(message, reply_markup=keyboard)
@@ -228,7 +228,6 @@ async def receive_fan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     client = EsignetClient()
     step = "configuration"
     try:
-        await delete_sensitive_message(message)
         client.check_configuration()
         await message.reply_text("Connecting securely to Fayda and requesting your OTP. Please wait…")
         step = "CSRF initialization"
@@ -259,7 +258,7 @@ async def receive_fan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         if exc.code == "CONFIG_MISSING":
             await message.reply_text(
                 "The Fayda resident API connection is not configured by the operator yet. "
-                "Please try again later. Your FAN message was deleted where Telegram allowed it."
+                "Please try again later. Your FAN message remains visible in this chat."
             )
         else:
             await message.reply_text(
@@ -287,7 +286,6 @@ async def receive_otp(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     if not message or not user:
         return
     otp = (message.text or "").strip()
-    await delete_sensitive_message(message)
     if time.monotonic() > float(context.user_data.get("identity_session_expires_at", 0)):
         stale = context.application.bot_data.setdefault("esignet_clients", {}).pop(user.id, None)
         if stale:
