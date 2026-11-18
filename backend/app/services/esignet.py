@@ -85,6 +85,14 @@ class EsignetClient:
         headers.update(extra or {})
         return headers
 
+    def check_configuration(self) -> None:
+        """Fail before requesting an OTP if the resident API credential is absent."""
+        if not os.getenv("FAYDA_RESIDENT_AUTHORIZATION", "").strip():
+            raise EsignetError(
+                "CONFIG_MISSING",
+                "Fayda resident API authorization is not configured by the operator.",
+            )
+
     def _resident_headers(self, extra: dict | None = None) -> dict:
         authorization = os.getenv("FAYDA_RESIDENT_AUTHORIZATION", "").strip()
         if not authorization:
@@ -309,9 +317,9 @@ class EsignetClient:
             elif isinstance(address, str):
                 region["eng"] = address
         nationality = identity.get("residenceStatus") or identity.get("nationality") or raw.get("nationality") or ""
-        nat = bilingual(nationality) if nationality else {"eng": "Ethiopian", "amh": "ኢትዮጵያዊ"}
+        nat = bilingual(nationality) if nationality else {"eng": "", "amh": ""}
         if nationality and not nat["eng"]:
-            nat = {"eng": str(nationality), "amh": "ኢትዮጵያዊ"}
+            nat = {"eng": str(nationality), "amh": ""}
         return {
             "fullName": bilingual(name), "dateOfBirth": (
                 identity.get("dateOfBirth") or identity.get("dob")
