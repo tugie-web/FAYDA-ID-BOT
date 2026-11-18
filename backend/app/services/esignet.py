@@ -79,6 +79,12 @@ class EsignetClient:
             "Content-Type": "application/json",
             "Origin": "https://auth.fayda.et",
             "Referer": "https://auth.fayda.et/",
+            "Sec-Fetch-Dest": "empty",
+            "Sec-Fetch-Mode": "cors",
+            "Sec-Fetch-Site": "same-origin",
+            "Sec-Ch-Ua": '"Google Chrome";v="149","Chromium";v="149","Not)A;Brand";v="24"',
+            "Sec-Ch-Ua-Mobile": "?0",
+            "Sec-Ch-Ua-Platform": '"Windows"',
         }
         if self.csrf_token:
             headers["X-XSRF-TOKEN"] = self.csrf_token
