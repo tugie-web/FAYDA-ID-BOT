@@ -57,11 +57,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         ])
     keyboard = InlineKeyboardMarkup(buttons)
     message = (
-        "Welcome to FAYDA ID BOT.
-
-"
-        "Tap Start to begin. The next step will be FAN entry, followed by the OTP process.
-"
+        "Welcome to FAYDA ID BOT.\n\n"
+        "Tap Start to begin. The next step will be FAN entry, followed by the OTP process.\n"
         "Only enter your FAN after tapping Start. Your FAN and OTP messages will remain visible in this chat. Keep this chat private."
     )
     if update.effective_message:
@@ -76,9 +73,7 @@ async def begin_fayda_flow(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     context.user_data.pop("identity_summary_data", None)
     context.user_data["identity_flow_stage"] = "awaiting_fan"
     await query.message.reply_text(
-        "Please enter your FAN (Fayda Identification Number).
-
-"
+        "Please enter your FAN (Fayda Identification Number).\n\n"
         "Your FAN is used only to start the secure Fayda verification process."
     )
 
@@ -131,8 +126,7 @@ async def resend_fayda_otp(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         context.user_data["otp_resend_count"] = resend_count + 1
         context.user_data["otp_resend_after"] = time.monotonic() + 60
         destination = result.get("maskedMobile") or result.get("maskedEmail")
-        suffix = f"
-OTP destination: {destination}" if destination else ""
+        suffix = f"\nOTP destination: {destination}" if destination else ""
         await query.message.reply_text(
             "A new OTP request was sent by Fayda. Use the latest OTP; an earlier code may no longer work."
             + suffix,
@@ -253,12 +247,10 @@ async def receive_fan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         context.user_data["otp_resend_after"] = time.monotonic() + 60
         context.user_data["identity_session_expires_at"] = time.monotonic() + 600
         destination = masked.get("maskedMobile") or masked.get("maskedEmail")
-        suffix = f"
-OTP destination: {destination}" if destination else ""
+        suffix = f"\nOTP destination: {destination}" if destination else ""
         await message.reply_text(
             "OTP request successful. Please enter the OTP sent by Fayda." + suffix
-            + "
-If it does not arrive, you can request another one after 60 seconds.",
+            + "\nIf it does not arrive, you can request another one after 60 seconds.",
             reply_markup=otp_keyboard(),
         )
     except EsignetError as exc:
@@ -459,9 +451,7 @@ async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         InlineKeyboardButton("＋ Add free user", callback_data="free_access_add")
     ]])
     await update.effective_message.reply_text(
-        "Administrator controls
-
-Your account always has free access. "
+        "Administrator controls\n\nYour account always has free access. "
         "Use the button to whitelist another Telegram user.",
         reply_markup=keyboard,
     )
@@ -523,12 +513,8 @@ async def freeusers_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     finally:
         db.close()
     await update.effective_message.reply_text(
-        "Whitelisted users:
-" + ("
-".join(ids) if ids else "No additional users yet.")
-        + "
-
-Administrator accounts are free automatically."
+        "Whitelisted users:\n" + ("\n".join(ids) if ids else "No additional users yet.")
+        + "\n\nAdministrator accounts are free automatically."
     )
 
 
