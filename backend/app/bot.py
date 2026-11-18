@@ -375,19 +375,17 @@ async def receive_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 
 def _probe_fayda_connection() -> str:
-    """Compare outbound DNS, TCP, TLS, and HTTPS connectivity without FAN or credentials."""
+    """Compare standard TLS with browser-compatible TLS without FAN or credentials."""
     import socket
     import ssl
     import requests
+    from curl_cffi import requests as curl_requests
 
     hosts = ("auth.fayda.et", "api-resident.fayda.et", "www.google.com")
     lines = []
     for host in hosts:
         try:
-            addresses = sorted({
-                item[4][0]
-                for item in socket.getaddrinfo(host, 443, type=socket.SOCK_STREAM)
-            })
+            socket.getaddrinfo(host, 443, type=socket.SOCK_STREAM)
             lines.append(f"{host} DNS: OK")
         except Exception as exc:
             lines.append(f"{host} DNS: FAILED ({type(exc).__name__})")
@@ -395,34 +393,49 @@ def _probe_fayda_connection() -> str:
 
         try:
             raw = socket.create_connection((host, 443), timeout=6)
+            raw.close()
+            lines.append(f"{host} TCP/443: OK")
         except Exception as exc:
             lines.append(f"{host} TCP/443: FAILED ({type(exc).__name__})")
             continue
 
-        lines.append(f"{host} TCP/443: OK")
         try:
+            raw = socket.create_connection((host, 443), timeout=6)
             raw.settimeout(8)
             with raw:
                 with ssl.create_default_context().wrap_socket(raw, server_hostname=host) as secure:
-                    lines.append(f"{host} TLS: OK ({secure.version()})")
+                    lines.append(f"{host} standard TLS: OK ({secure.version()})")
         except Exception as exc:
-            lines.append(f"{host} TLS: FAILED ({type(exc).__name__})")
-            continue
+            lines.append(f"{host} standard TLS: FAILED ({type(exc).__name__})")
+
+        url = (
+            "https://auth.fayda.et/v1/esignet/csrf/token"
+            if host == "auth.fayda.et"
+            else f"https://{host}/"
+        )
+        try:
+            response = curl_requests.get(
+                url,
+                impersonate="chrome",
+                headers={"Accept": "application/xml, text/xml, application/json, */*"},
+                timeout=15,
+                allow_redirects=False,
+            )
+            lines.append(f"{host} Chrome-compatible HTTPS: HTTP {response.status_code}")
+            lines.append("Response body/token: not displayed")
+        except Exception as exc:
+            lines.append(f"{host} Chrome-compatible HTTPS: FAILED ({type(exc).__name__})")
 
         if host == "auth.fayda.et":
             try:
                 response = requests.get(
-                    "https://auth.fayda.et/v1/esignet/csrf/token",
-                    headers={
-                        "User-Agent": "FAYDA-ID-BOT connectivity check",
-                        "Accept": "application/xml, text/xml, */*",
-                    },
+                    url,
+                    headers={"User-Agent": "FAYDA-ID-BOT connectivity check"},
                     timeout=(6, 10),
                 )
-                lines.append(f"Fayda CSRF HTTPS: HTTP {response.status_code}")
-                lines.append("Response body/token: not displayed")
+                lines.append(f"{host} standard HTTPS: HTTP {response.status_code}")
             except Exception as exc:
-                lines.append(f"Fayda CSRF HTTPS: FAILED ({type(exc).__name__})")
+                lines.append(f"{host} standard HTTPS: FAILED ({type(exc).__name__})")
 
     return "\\n".join(lines)
 
