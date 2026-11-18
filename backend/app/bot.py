@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import time
 
 from telegram import (
     BotCommand,
@@ -72,6 +73,65 @@ async def begin_fayda_flow(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     )
 
 
+def otp_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton("↻ Resend OTP", callback_data="resend_fayda_otp")
+    ]])
+
+
+async def resend_fayda_otp(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if not query:
+        return
+    user_id = query.from_user.id
+    if context.user_data.get("identity_flow_stage") != "awaiting_otp":
+        await query.answer("Start a new Fayda request first.", show_alert=True)
+        return
+
+    clients = context.application.bot_data.setdefault("esignet_clients", {})
+    client = clients.get(user_id)
+    if client is None:
+        context.user_data.pop("identity_flow_stage", None)
+        await query.answer("Your Fayda session expired. Please start again.", show_alert=True)
+        return
+
+    now = time.monotonic()
+    next_allowed = float(context.user_data.get("otp_resend_after", 0))
+    if now < next_allowed:
+        wait_seconds = max(1, int(next_allowed - now + 0.999))
+        await query.answer(f"Please wait {wait_seconds} seconds before resending.", show_alert=True)
+        return
+
+    resend_count = int(context.user_data.get("otp_resend_count", 0))
+    if resend_count >= 3:
+        await query.answer("You have reached the resend limit. Please start again later.", show_alert=True)
+        return
+
+    await query.answer("Requesting a new OTP…")
+    try:
+        result = await asyncio.to_thread(client.send_otp)
+        context.user_data["otp_resend_count"] = resend_count + 1
+        context.user_data["otp_resend_after"] = time.monotonic() + 60
+        destination = result.get("maskedMobile") or result.get("maskedEmail")
+        suffix = f"\nOTP destination: {destination}" if destination else ""
+        await query.message.reply_text(
+            "A new OTP request was sent by Fayda. Use the latest OTP; an earlier code may no longer work."
+            + suffix,
+            reply_markup=otp_keyboard(),
+        )
+    except EsignetError as exc:
+        await query.message.reply_text(
+            f"Fayda could not resend the OTP. Please try again later. Reference: {exc.code}",
+            reply_markup=otp_keyboard(),
+        )
+    except Exception:
+        logger.warning("Fayda OTP resend failed; sensitive request details are omitted.")
+        await query.message.reply_text(
+            "We could not resend the OTP right now. Please try again later.",
+            reply_markup=otp_keyboard(),
+        )
+
+
 async def receive_fan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     message = update.effective_message
     user = update.effective_user
@@ -94,9 +154,15 @@ async def receive_fan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             previous.close()
         clients[user.id] = client
         context.user_data["identity_flow_stage"] = "awaiting_otp"
+        context.user_data["otp_resend_count"] = 0
+        context.user_data["otp_resend_after"] = time.monotonic() + 60
         destination = masked.get("maskedMobile") or masked.get("maskedEmail")
         suffix = f"\nOTP destination: {destination}" if destination else ""
-        await message.reply_text("OTP request successful. Please enter the OTP sent by Fayda." + suffix)
+        await message.reply_text(
+            "OTP request successful. Please enter the OTP sent by Fayda." + suffix
+            + "\nIf it does not arrive, you can request another one after 60 seconds.",
+            reply_markup=otp_keyboard(),
+        )
     except EsignetError as exc:
         client.close()
         context.user_data.pop("identity_flow_stage", None)
@@ -135,8 +201,9 @@ async def receive_otp(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         )
     except EsignetError as exc:
         await message.reply_text(
-            "Fayda did not accept that OTP. Please check it and try again. "
-            f"Reference: {exc.code}"
+            "Fayda did not accept that OTP. Please check it and try again, or request a new OTP. "
+            f"Reference: {exc.code}",
+            reply_markup=otp_keyboard(),
         )
     except Exception:
         logger.warning("Fayda OTP verification failed; sensitive request details are omitted.")
@@ -267,6 +334,7 @@ def main() -> None:
     application = Application.builder().token(token).post_init(post_init).build()
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CallbackQueryHandler(begin_fayda_flow, pattern="^begin_fayda_flow$"))
+    application.add_handler(CallbackQueryHandler(resend_fayda_otp, pattern="^resend_fayda_otp$"))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("admin", admin_command))
     application.add_handler(CommandHandler("freeusers", freeusers_command))
