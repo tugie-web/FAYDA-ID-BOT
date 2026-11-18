@@ -35,7 +35,8 @@ logger = logging.getLogger(__name__)
 async def post_init(application: Application) -> None:
     await application.bot.set_my_commands([
         BotCommand("start", "Open FAYDA ID BOT"),
-        BotCommand("help", "Show help and available commands"),\n        BotCommand("fayda_test", "Test the Fayda connection (admin only)"),
+        BotCommand("help", "Show help and available commands"),
+        BotCommand("fayda_test", "Test the Fayda connection (admin only)"),
         BotCommand("admin", "Open administrator controls"),
         BotCommand("freeusers", "List users with free access"),
         BotCommand("revokefree", "Remove a user's free access"),
@@ -56,8 +57,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         ])
     keyboard = InlineKeyboardMarkup(buttons)
     message = (
-        "Welcome to FAYDA ID BOT.\n\n"
-        "Tap Start to begin. The next step will be FAN entry, followed by the OTP process.\n"
+        "Welcome to FAYDA ID BOT.
+
+"
+        "Tap Start to begin. The next step will be FAN entry, followed by the OTP process.
+"
         "Only enter your FAN after tapping Start. Your FAN and OTP messages will remain visible in this chat. Keep this chat private."
     )
     if update.effective_message:
@@ -72,7 +76,9 @@ async def begin_fayda_flow(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     context.user_data.pop("identity_summary_data", None)
     context.user_data["identity_flow_stage"] = "awaiting_fan"
     await query.message.reply_text(
-        "Please enter your FAN (Fayda Identification Number).\n\n"
+        "Please enter your FAN (Fayda Identification Number).
+
+"
         "Your FAN is used only to start the secure Fayda verification process."
     )
 
@@ -125,7 +131,8 @@ async def resend_fayda_otp(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         context.user_data["otp_resend_count"] = resend_count + 1
         context.user_data["otp_resend_after"] = time.monotonic() + 60
         destination = result.get("maskedMobile") or result.get("maskedEmail")
-        suffix = f"\nOTP destination: {destination}" if destination else ""
+        suffix = f"
+OTP destination: {destination}" if destination else ""
         await query.message.reply_text(
             "A new OTP request was sent by Fayda. Use the latest OTP; an earlier code may no longer work."
             + suffix,
@@ -246,10 +253,12 @@ async def receive_fan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         context.user_data["otp_resend_after"] = time.monotonic() + 60
         context.user_data["identity_session_expires_at"] = time.monotonic() + 600
         destination = masked.get("maskedMobile") or masked.get("maskedEmail")
-        suffix = f"\nOTP destination: {destination}" if destination else ""
+        suffix = f"
+OTP destination: {destination}" if destination else ""
         await message.reply_text(
             "OTP request successful. Please enter the OTP sent by Fayda." + suffix
-            + "\nIf it does not arrive, you can request another one after 60 seconds.",
+            + "
+If it does not arrive, you can request another one after 60 seconds.",
             reply_markup=otp_keyboard(),
         )
     except EsignetError as exc:
@@ -393,7 +402,8 @@ def _probe_fayda_connection() -> str:
                 lines.append("TLS: OK (" + secure.version() + ")")
     except Exception as exc:
         lines.append("TLS: FAILED (" + type(exc).__name__ + ")")
-        return "\n".join(lines)
+        return "
+".join(lines)
 
     try:
         started = time.monotonic()
@@ -408,7 +418,8 @@ def _probe_fayda_connection() -> str:
         lines.append("Response body/token: not displayed")
     except Exception as exc:
         lines.append("CSRF HTTP: FAILED (" + type(exc).__name__ + ")")
-    return "\n".join(lines)
+    return "
+".join(lines)
 
 
 async def fayda_test_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -421,17 +432,25 @@ async def fayda_test_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
         result = await asyncio.to_thread(_probe_fayda_connection)
     except Exception as exc:
         result = "Diagnostic failed safely: " + type(exc).__name__
-    await update.effective_message.reply_text("Fayda connection test:\n" + result)
+    await update.effective_message.reply_text("Fayda connection test:
+" + result)
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if update.effective_message:
         await update.effective_message.reply_text(
-            "FAYDA ID BOT help\n\n"
-            "/start — open the welcome screen and Mini App\n"
-            "/help — show this help message\n"
-            "/fayda_test — test the Fayda connection (admin only)\n"
-            "/admin — administrator controls (admin only)\n\n"
+            "FAYDA ID BOT help
+
+"
+            "/start — open the welcome screen and Mini App
+"
+            "/help — show this help message
+"
+            "/fayda_test — test the Fayda connection (admin only)
+"
+            "/admin — administrator controls (admin only)
+
+"
             "For account or payment questions, use the support option in the Mini App."
         )
 
@@ -443,7 +462,9 @@ async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         InlineKeyboardButton("＋ Add free user", callback_data="free_access_add")
     ]])
     await update.effective_message.reply_text(
-        "Administrator controls\n\nYour account always has free access. "
+        "Administrator controls
+
+Your account always has free access. "
         "Use the button to whitelist another Telegram user.",
         reply_markup=keyboard,
     )
@@ -505,8 +526,12 @@ async def freeusers_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     finally:
         db.close()
     await update.effective_message.reply_text(
-        "Whitelisted users:\n" + ("\n".join(ids) if ids else "No additional users yet.")
-        + "\n\nAdministrator accounts are free automatically."
+        "Whitelisted users:
+" + ("
+".join(ids) if ids else "No additional users yet.")
+        + "
+
+Administrator accounts are free automatically."
     )
 
 
@@ -540,7 +565,8 @@ def main() -> None:
     application.add_handler(CallbackQueryHandler(begin_fayda_flow, pattern="^begin_fayda_flow$"))
     application.add_handler(CallbackQueryHandler(resend_fayda_otp, pattern="^resend_fayda_otp$"))
     application.add_handler(CallbackQueryHandler(deliver_identity_output, pattern="^identity_(pdf|print|both)$"))
-    application.add_handler(CommandHandler("help", help_command))\n    application.add_handler(CommandHandler("fayda_test", fayda_test_command))
+    application.add_handler(CommandHandler("help", help_command))
+    application.add_handler(CommandHandler("fayda_test", fayda_test_command))
     application.add_handler(CommandHandler("admin", admin_command))
     application.add_handler(CommandHandler("freeusers", freeusers_command))
     application.add_handler(CommandHandler("revokefree", revokefree_command))
