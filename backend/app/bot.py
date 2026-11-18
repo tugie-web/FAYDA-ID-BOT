@@ -375,47 +375,55 @@ async def receive_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 
 def _probe_fayda_connection() -> str:
-    """Test DNS, TLS, and Fayda's public CSRF endpoint without FAN or credentials."""
+    """Compare outbound DNS, TCP, TLS, and HTTPS connectivity without FAN or credentials."""
     import socket
     import ssl
     import requests
 
-    host = "auth.fayda.et"
+    hosts = ("auth.fayda.et", "api-resident.fayda.et", "www.google.com")
     lines = []
-    try:
-        addresses = sorted({
-            item[4][0]
-            for item in socket.getaddrinfo(host, 443, type=socket.SOCK_STREAM)
-        })
-        lines.append("DNS: OK (" + ", ".join(addresses[:4]) + ")")
-    except Exception as exc:
-        return "DNS: FAILED (" + type(exc).__name__ + ")"
+    for host in hosts:
+        try:
+            addresses = sorted({
+                item[4][0]
+                for item in socket.getaddrinfo(host, 443, type=socket.SOCK_STREAM)
+            })
+            lines.append(f"{host} DNS: OK")
+        except Exception as exc:
+            lines.append(f"{host} DNS: FAILED ({type(exc).__name__})")
+            continue
 
-    try:
-        raw = socket.create_connection((host, 443), timeout=7)
-        with raw:
-            with ssl.create_default_context().wrap_socket(raw, server_hostname=host) as secure:
-                lines.append("TLS: OK (" + secure.version() + ")")
-    except Exception as exc:
-        lines.append("TLS: FAILED (" + type(exc).__name__ + ")")
-        return "\\n".join(lines)
+        try:
+            raw = socket.create_connection((host, 443), timeout=6)
+        except Exception as exc:
+            lines.append(f"{host} TCP/443: FAILED ({type(exc).__name__})")
+            continue
 
-    try:
-        started = time.monotonic()
-        response = requests.get(
-            "https://auth.fayda.et/v1/esignet/csrf/token",
-            headers={
-                "User-Agent": "FAYDA-ID-BOT connectivity check",
-                "Accept": "application/xml, text/xml, */*",
-            },
-            timeout=(7, 12),
-        )
-        elapsed = round(time.monotonic() - started, 2)
-        lines.append(f"CSRF HTTP: {response.status_code} ({elapsed}s)")
-        lines.append("Response type: " + response.headers.get("Content-Type", "not provided"))
-        lines.append("Response body/token: not displayed")
-    except Exception as exc:
-        lines.append("CSRF HTTP: FAILED (" + type(exc).__name__ + ")")
+        lines.append(f"{host} TCP/443: OK")
+        try:
+            raw.settimeout(8)
+            with raw:
+                with ssl.create_default_context().wrap_socket(raw, server_hostname=host) as secure:
+                    lines.append(f"{host} TLS: OK ({secure.version()})")
+        except Exception as exc:
+            lines.append(f"{host} TLS: FAILED ({type(exc).__name__})")
+            continue
+
+        if host == "auth.fayda.et":
+            try:
+                response = requests.get(
+                    "https://auth.fayda.et/v1/esignet/csrf/token",
+                    headers={
+                        "User-Agent": "FAYDA-ID-BOT connectivity check",
+                        "Accept": "application/xml, text/xml, */*",
+                    },
+                    timeout=(6, 10),
+                )
+                lines.append(f"Fayda CSRF HTTPS: HTTP {response.status_code}")
+                lines.append("Response body/token: not displayed")
+            except Exception as exc:
+                lines.append(f"Fayda CSRF HTTPS: FAILED ({type(exc).__name__})")
+
     return "\\n".join(lines)
 
 
