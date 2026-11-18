@@ -10,6 +10,8 @@ import base64
 import hashlib
 import json
 import os
+import time
+import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from typing import Any
 
@@ -143,16 +145,63 @@ class EsignetClient:
         self.code_challenge = self._sha256_b64url(self.code_verifier)
         self.nonce = self._rand(16)
         self.state = self._rand(16)
-        response = self.session.get(
-            f"{AUTH_BASE}/csrf/token", headers=self._auth_headers(), timeout=self.timeout
-        )
-        response.raise_for_status()
-        data = response.json()
-        token = (
-            data.get("token") or data.get("csrfToken")
-            or (data.get("response") or {}).get("token")
-            or self.session.cookies.get("XSRF-TOKEN", "")
-        )
+        # Fayda's CSRF endpoint can intermittently stall. Retry this safe GET
+        # a small number of times; never retry OTP or identity POST requests.
+        response = None
+        last_error = None
+        for attempt in range(3):
+            try:
+                response = self.session.get(
+                    f"{AUTH_BASE}/csrf/token",
+                    headers=self._auth_headers({
+                        "Accept": "application/json, application/xml, text/xml, */*",
+                    }),
+                    timeout=(10, self.timeout),
+                )
+                if response.status_code in (502, 503, 504) and attempt < 2:
+                    response.close()
+                    time.sleep(2 ** attempt)
+                    continue
+                response.raise_for_status()
+                break
+            except (requests.Timeout, requests.ConnectionError) as exc:
+                last_error = exc
+                if attempt == 2:
+                    raise
+                time.sleep(2 ** attempt)
+        if response is None:
+            raise last_error or requests.RequestException("Fayda CSRF request failed")
+
+        token = ""
+        content_type = response.headers.get("Content-Type", "").lower()
+        if "json" in content_type:
+            try:
+                data = response.json()
+            except ValueError:
+                data = {}
+            token = (
+                data.get("token") or data.get("csrfToken")
+                or (data.get("response") or {}).get("token")
+            )
+        else:
+            # The browser-visible Fayda endpoint may return SupplierCsrfToken XML.
+            try:
+                root = ET.fromstring(response.content)
+                for node in root.iter():
+                    if node.tag.rsplit("}", 1)[-1].lower() in ("token", "csrftoken"):
+                        token = (node.text or "").strip()
+                        if token:
+                            break
+            except ET.ParseError:
+                try:
+                    data = response.json()
+                except ValueError:
+                    data = {}
+                token = (
+                    data.get("token") or data.get("csrfToken")
+                    or (data.get("response") or {}).get("token")
+                )
+        token = token or self.session.cookies.get("XSRF-TOKEN", "")
         if not token:
             raise EsignetError("NO_CSRF", "Could not start a secure Fayda session.")
         self.csrf_token = token
