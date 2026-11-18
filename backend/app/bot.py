@@ -35,7 +35,7 @@ logger = logging.getLogger(__name__)
 async def post_init(application: Application) -> None:
     await application.bot.set_my_commands([
         BotCommand("start", "Open FAYDA ID BOT"),
-        BotCommand("help", "Show help and available commands"),
+        BotCommand("help", "Show help and available commands"),\n        BotCommand("fayda_test", "Test the Fayda connection (admin only)"),
         BotCommand("admin", "Open administrator controls"),
         BotCommand("freeusers", "List users with free access"),
         BotCommand("revokefree", "Remove a user's free access"),
@@ -373,6 +373,58 @@ async def receive_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     await receive_free_user_id(update, context)
 
 
+def _probe_fayda_connection() -> str:
+    """Test DNS, TCP/TLS, and the public CSRF endpoint without using FAN or credentials."""
+    import socket
+    import ssl
+    from urllib.parse import urlparse
+
+    host = "auth.fayda.et"
+    lines = []
+    try:
+        addresses = sorted({item[4][0] for item in socket.getaddrinfo(host, 443, type=socket.SOCK_STREAM)})
+        lines.append("DNS: OK (" + ", ".join(addresses[:4]) + ")")
+    except Exception as exc:
+        return "DNS: FAILED (" + type(exc).__name__ + ")"
+
+    try:
+        raw = socket.create_connection((host, 443), timeout=7)
+        with raw:
+            with ssl.create_default_context().wrap_socket(raw, server_hostname=host) as secure:
+                lines.append("TLS: OK (" + secure.version() + ")")
+    except Exception as exc:
+        lines.append("TLS: FAILED (" + type(exc).__name__ + ")")
+        return "\\n".join(lines)
+
+    try:
+        started = time.monotonic()
+        response = requests.get(
+            "https://auth.fayda.et/v1/esignet/csrf/token",
+            headers={"User-Agent": "FAYDA-ID-BOT connectivity check", "Accept": "application/xml, text/xml, */*"},
+            timeout=(7, 12),
+        )
+        elapsed = round(time.monotonic() - started, 2)
+        lines.append(f"CSRF HTTP: {response.status_code} ({elapsed}s)")
+        lines.append("Response type: " + response.headers.get("Content-Type", "not provided"))
+        lines.append("Response body/token: not displayed")
+    except Exception as exc:
+        lines.append("CSRF HTTP: FAILED (" + type(exc).__name__ + ")")
+    return "\\n".join(lines)
+
+
+async def fayda_test_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not admin_only(update):
+        return
+    await update.effective_message.reply_text(
+        "Testing Railway's connection to Fayda. This does not use your FAN or request an OTP…"
+    )
+    try:
+        result = await asyncio.to_thread(_probe_fayda_connection)
+    except Exception as exc:
+        result = "Diagnostic failed safely: " + type(exc).__name__
+    await update.effective_message.reply_text("Fayda connection test:\\n" + result)
+
+
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if update.effective_message:
         await update.effective_message.reply_text(
@@ -488,7 +540,7 @@ def main() -> None:
     application.add_handler(CallbackQueryHandler(begin_fayda_flow, pattern="^begin_fayda_flow$"))
     application.add_handler(CallbackQueryHandler(resend_fayda_otp, pattern="^resend_fayda_otp$"))
     application.add_handler(CallbackQueryHandler(deliver_identity_output, pattern="^identity_(pdf|print|both)$"))
-    application.add_handler(CommandHandler("help", help_command))
+    application.add_handler(CommandHandler("help", help_command))\n    application.add_handler(CommandHandler("fayda_test", fayda_test_command))
     application.add_handler(CommandHandler("admin", admin_command))
     application.add_handler(CommandHandler("freeusers", freeusers_command))
     application.add_handler(CommandHandler("revokefree", revokefree_command))
