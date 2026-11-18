@@ -1,55 +1,114 @@
 # FAYDA ID BOT
 
-A new public, bilingual Telegram service platform with a mobile-first Mini App. This repository is separate from any existing bot.
+A public, bilingual Telegram service platform with a mobile-first Mini App. This repository is separate from any previous bot project.
+
+## Architecture
+
+This repository contains three deployable parts:
+
+- **Telegram bot** — `backend/app/bot.py`; handles `/start` and `/help` using Telegram long polling.
+- **API backend** — `backend/app/main.py`; FastAPI service for health, status, authentication, orders, and payment submissions.
+- **Mini App** — `frontend/`; React + TypeScript interface opened from the Telegram bot.
+
+The bot and API must run as **two separate services**. Do not start long polling inside the FastAPI web process.
 
 ## Product direction
+
 - Public user access with private, role-protected administration
 - English and Amharic interface
 - Telegram bot + Mini App
 - FastAPI backend, PostgreSQL data layer, Redis-ready configuration
-- Paid services with verified payment-provider webhooks
+- Paid services with payment verification and manual-review fallback
 - Dark navy interface with cyan and violet accents
 
-## Integration boundary
-This application does not issue, alter, or certify official Fayda identity credentials. Identity verification or eSignet workflows must use an officially authorized Fayda integration and approved credentials. Until access and permissions are confirmed, the application remains in safe demo mode.
+## Current bot commands
+
+- `/start` — sends the welcome message and, when configured, the Mini App button.
+- `/help` — lists the available commands.
+
+The bot registers these commands in Telegram when it starts. It uses long polling, so only one running bot service should use this token at a time.
+
+## Integration and safety boundary
+
+This application does not issue, alter, or certify official Fayda identity credentials. Identity verification or eSignet workflows must use an officially authorized Fayda integration and approved credentials. Until access and permissions are confirmed, identity services remain disabled.
+
+Never ask users to send OTPs to the bot. Never claim a payment or identity result is verified unless an authorized verification source confirms it.
+
+## Payments
+
+The backend has a provider-specific Cheki verification service for CBE Bank (`cbe`) and Telebirr (`telebirr`). CBE Birr (`cbebirr`) is accepted for manual review only. A payment is not approved from a screenshot, HTTP success alone, or transaction-reference format.
+
+Customer order endpoints require valid Telegram Mini App initData. Prices come from the server-side `SERVICE_CATALOG_JSON`, not the browser. Customers can only view and submit payments for their own orders. Automatic verification remains in manual-review mode until trusted merchant receiver details are configured.
+
+Cheki documentation: https://cheki.et/docs
 
 ## Security
+
 - Never commit tokens, API credentials, signing keys, OTPs, or customer identity data.
+- Keep all secrets in the hosting provider's environment variables.
 - Validate Telegram Mini App initData on the server before accepting customer actions.
 - Never log or store OTP values in plaintext.
-- Verify payment references server-side; screenshots are not proof of payment.
 - Use least-privilege admin roles, audit logs, rate limits, and data-retention rules.
+- Configure trusted receiver details only after confirming the merchant accounts.
 
-## Payment verification and persistence
+## Environment variables
 
-The backend includes a provider-specific Cheki verification service for CBE Bank (`cbe`) and Telebirr (`telebirr`). The persistence layer also recognizes CBE Birr (`cbebirr`) as a payment choice, but automatic Cheki verification for that provider is not enabled yet; keep it in manual review until its exact API support is confirmed.
+See `.env.example`. Important variables:
 
-The database layer stores orders and payment submissions, enforces a UNIQUE constraint on `(provider, transaction_reference)`, and records verification source and manual-review audit details. An order is marked paid only after Cheki returns `verified: true` with matching provider, amount, and currency, or after an authorized admin explicitly approves it through the internal review function.
+- `TELEGRAM_BOT_TOKEN` — required by the Telegram bot and Mini App authentication.
+- `TELEGRAM_MINI_APP_URL` — public HTTPS URL of the deployed Mini App.
+- `DATABASE_URL` — production PostgreSQL connection string.
+- `SERVICE_CATALOG_JSON` — server-controlled service codes and ETB prices, e.g. a JSON object such as `{"sample_service": "50"}`.
+- `CBE_RECEIVER_NAME`, `CBE_RECEIVER_ACCOUNT_SUFFIX`, `TELEBIRR_RECEIVER_NAME`, `TELEBIRR_RECEIVER_ACCOUNT_SUFFIX` — trusted receiver details used to gate automatic verification.
 
-These are backend building blocks, not public payment endpoints. Do not expose order/payment operations until Telegram Mini App identity validation, customer ownership checks, and admin authorization are implemented. Configure PostgreSQL through `DATABASE_URL`; SQLite is only a local development fallback. Apply schema migrations before production deployment.
-
-Cheki API contract: https://cheki.et/docs. Its hosted API is rate-limited and may be unavailable for some providers from some server regions, so manual review remains a fallback. Never treat HTTP 200, a transaction-ID format, or a screenshot alone as proof.
-
-## Layout
-- backend/: FastAPI service and database layer
-- frontend/: React + TypeScript Mini App
-- .env.example: placeholders only; copy locally to .env
+Do not put real values in GitHub or send them in chat.
 
 ## Local development
-Backend: `cd backend`, install `requirements.txt`, then run `uvicorn app.main:app --reload`.
-Frontend: `cd frontend`, run `npm install`, then `npm run dev`.
 
-The first release remains a safe foundation. Real identity and payment integrations are not enabled until authorization, provider details, and secure user/admin flows are confirmed.
+Backend API:
 
+```bash
+cd backend
+pip install -r requirements.txt
+uvicorn app.main:app --reload
+```
 
-## Authenticated customer API foundation
+Telegram bot (in a second terminal):
 
-Customer order endpoints require a valid Telegram Mini App initData signature in the Authorization header. The backend validates the HMAC signature and rejects expired initData (five-minute default). It derives the customer Telegram ID from the signed Telegram user object; clients cannot choose another customer ID.
+```bash
+cd backend
+python -m app.bot
+```
 
-- POST /api/v1/orders: creates an order using a server-controlled service price from SERVICE_CATALOG_JSON.
-- GET /api/v1/orders: lists only the signed-in customer's orders.
-- POST /api/v1/orders/{order_id}/payments: accepts provider and transaction reference; the amount comes from the stored order, not the client.
+Frontend:
 
-Automatic Cheki approval is blocked until the trusted receiver name and account suffix are configured for that provider. CBE Birr remains manual-review only. The Mini App API helper sends Telegram initData and does not store the bot token.
+```bash
+cd frontend
+npm install
+npm run dev
+```
 
-Admin review routes are intentionally not public yet. Add administrator allowlisting, audit logging, and authorization before exposing any admin action. Local development auto-creates tables; production must use managed schema migrations before deployment.
+## Deployment outline
+
+Deploy the frontend as a static site and set `TELEGRAM_MINI_APP_URL` to its public HTTPS URL.
+
+Deploy the backend directory as a Docker service using `backend/Dockerfile` (or set the service root directory to `backend`):
+
+1. **API service start command:** `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
+2. **Bot service start command:** `python -m app.bot`
+
+Both backend services need the same `TELEGRAM_BOT_TOKEN`. The bot service also needs `TELEGRAM_MINI_APP_URL`. The API service needs `DATABASE_URL`, `FRONTEND_ORIGIN`, and the appropriate server-side service/merchant configuration.
+
+Use a persistent managed PostgreSQL database. Production startup intentionally does not create database tables automatically; run database migrations before enabling order/payment features. Do not run two bot instances with the same token because they will compete for Telegram updates.
+
+## Release readiness
+
+This repository is a working foundation, not yet a public production launch. Before launch:
+
+- Configure secrets in the hosting provider.
+- Deploy the frontend, API, and bot as separate services.
+- Add and run production database migrations.
+- Implement protected admin review endpoints and audit logs.
+- Run the automated test suite and a Telegram end-to-end test.
+- Confirm official Fayda authorization before enabling identity operations.
+- Verify merchant payment details and test every provider, including manual-review paths.
