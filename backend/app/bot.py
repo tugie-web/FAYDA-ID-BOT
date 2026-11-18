@@ -43,24 +43,31 @@ def admin_only(update: Update) -> bool:
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     mini_app_url = os.getenv("TELEGRAM_MINI_APP_URL", "").strip()
-    keyboard = None
+    buttons = [[InlineKeyboardButton("▶ Start", callback_data="begin_fayda_flow")]]
     if mini_app_url.startswith("https://"):
-        keyboard = InlineKeyboardMarkup(
-            [[InlineKeyboardButton("Open FAYDA ID", web_app=WebAppInfo(url=mini_app_url))]]
-        )
-        message = (
-            "Welcome to FAYDA ID BOT.\n\n"
-            "Tap the button below to open the Mini App and explore available services.\n"
-            "Identity services remain unavailable until an authorized official integration is configured."
-        )
-    else:
-        message = (
-            "Welcome to FAYDA ID BOT.\n\n"
-            "The Mini App is not configured yet. Please try again later.\n"
-            "Identity services remain unavailable until an authorized official integration is configured."
-        )
+        buttons.append([
+            InlineKeyboardButton("Open FAYDA ID Mini App", web_app=WebAppInfo(url=mini_app_url))
+        ])
+    keyboard = InlineKeyboardMarkup(buttons)
+    message = (
+        "Welcome to FAYDA ID BOT.\n\n"
+        "Tap Start to begin. The next step will be FAN entry, followed by the OTP process.\n"
+        "The secure identity workflow is still being connected, so please do not send your FAN yet."
+    )
     if update.effective_message:
         await update.effective_message.reply_text(message, reply_markup=keyboard)
+
+
+async def begin_fayda_flow(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if not query:
+        return
+    await query.answer()
+    await query.message.reply_text(
+        "You are ready to begin the Fayda ID process.\n\n"
+        "FAN entry will be the next step. The secure Fayda connection is not active yet, "
+        "so please do not send your FAN until the bot confirms that the service is ready."
+    )
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -175,6 +182,7 @@ def main() -> None:
         raise RuntimeError("TELEGRAM_BOT_TOKEN is required to run the Telegram bot.")
     application = Application.builder().token(token).post_init(post_init).build()
     application.add_handler(CommandHandler("start", start))
+    application.add_handler(CallbackQueryHandler(begin_fayda_flow, pattern="^begin_fayda_flow$"))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("admin", admin_command))
     application.add_handler(CommandHandler("freeusers", freeusers_command))
