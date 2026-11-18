@@ -1,7 +1,7 @@
+import asyncio
 from decimal import Decimal
 
 import httpx
-import pytest
 
 from app.services.payment_verification import PaymentProvider, verify_payment
 
@@ -13,22 +13,23 @@ def make_client(payload, status_code=200):
     return httpx.AsyncClient(transport=httpx.MockTransport(handler), base_url="https://cheki.et")
 
 
-@pytest.mark.asyncio
-async def test_cbe_payment_verified_only_for_cbe_and_exact_amount():
+def test_cbe_payment_verified_only_for_cbe_and_exact_amount():
     client = make_client({
         "success": True, "verified": True, "bankCode": "cbe",
         "amount": 250, "currency": "ETB",
         "receiverName": "FAYDA SERVICE", "receiverAccount": "1****1234",
     })
-    async with client:
-        result = await verify_payment(
-            provider=PaymentProvider.CBE_BANK,
-            reference="https://mbreciept.cbe.com.et/example",
-            expected_amount=Decimal("250"),
-            expected_receiver_name="Fayda Service",
-            expected_receiver_account_suffix="1234",
-            client=client,
-        )
+    async def run():
+        async with client:
+            return await verify_payment(
+                provider=PaymentProvider.CBE_BANK,
+                reference="https://mbreciept.cbe.com.et/example",
+                expected_amount=Decimal("250"),
+                expected_receiver_name="Fayda Service",
+                expected_receiver_account_suffix="1234",
+                client=client,
+            )
+    result = asyncio.run(run())
     assert result.can_activate_service is True
 
 
