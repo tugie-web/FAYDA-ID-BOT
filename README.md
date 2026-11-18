@@ -40,3 +40,16 @@ Backend: `cd backend`, install `requirements.txt`, then run `uvicorn app.main:ap
 Frontend: `cd frontend`, run `npm install`, then `npm run dev`.
 
 The first release remains a safe foundation. Real identity and payment integrations are not enabled until authorization, provider details, and secure user/admin flows are confirmed.
+
+
+## Authenticated customer API foundation
+
+Customer order endpoints require a valid Telegram Mini App initData signature in the Authorization header. The backend validates the HMAC signature and rejects expired initData (five-minute default). It derives the customer Telegram ID from the signed Telegram user object; clients cannot choose another customer ID.
+
+- POST /api/v1/orders: creates an order using a server-controlled service price from SERVICE_CATALOG_JSON.
+- GET /api/v1/orders: lists only the signed-in customer's orders.
+- POST /api/v1/orders/{order_id}/payments: accepts provider and transaction reference; the amount comes from the stored order, not the client.
+
+Automatic Cheki approval is blocked until the trusted receiver name and account suffix are configured for that provider. CBE Birr remains manual-review only. The Mini App API helper sends Telegram initData and does not store the bot token.
+
+Admin review routes are intentionally not public yet. Add administrator allowlisting, audit logging, and authorization before exposing any admin action. Local development auto-creates tables; production must use managed schema migrations before deployment.
