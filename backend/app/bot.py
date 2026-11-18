@@ -296,10 +296,41 @@ async def receive_otp(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await message.reply_text("Verifying your OTP with Fayda. Please wait…")
         await asyncio.to_thread(client.verify_otp, otp)
         context.user_data["identity_flow_stage"] = "otp_verified"
-        await message.reply_text(
-            "OTP verified successfully. The identity retrieval and document-delivery steps "
-            "are not yet connected, so no file can be generated in this version."
-        )
+        await message.reply_text("OTP verified successfully. Retrieving your Fayda identity information…")
+        try:
+            identity = await asyncio.to_thread(client.retrieve_identity)
+            context.user_data["identity_summary_data"] = identity
+            context.user_data["identity_summary_expires_at"] = time.monotonic() + 600
+            context.user_data["identity_flow_stage"] = "identity_ready"
+            await message.reply_text(
+                "Your identity information was retrieved successfully. Choose the file you want. "
+                "These are personal information summaries, not official Fayda identity documents.",
+                reply_markup=identity_output_keyboard(),
+            )
+            clients.pop(user.id, None)
+            client.close()
+        except EsignetError as identity_exc:
+            if identity_exc.code == "CONFIG_MISSING":
+                await message.reply_text(
+                    "OTP verification succeeded, but identity retrieval is not configured. "
+                    "The operator must add the approved Fayda resident API authorization in Railway. "
+                    "No identity file was created. After configuration, start a new request."
+                )
+            else:
+                await message.reply_text(
+                    "OTP verification succeeded, but Fayda could not return your identity information. "
+                    f"Reference: {identity_exc.code}. No file was created."
+                )
+        except Exception as identity_exc:
+            response = getattr(identity_exc, "response", None)
+            logger.warning(
+                "Fayda identity retrieval failed; exception_type=%s http_status=%s; personal data omitted.",
+                type(identity_exc).__name__, getattr(response, "status_code", None),
+            )
+            await message.reply_text(
+                "OTP verification succeeded, but identity retrieval failed. "
+                "Please try again later. No file was created."
+            )
     except EsignetError as exc:
         await message.reply_text(
             "Fayda did not accept that OTP. Please check it and try again, or request a new OTP. "
