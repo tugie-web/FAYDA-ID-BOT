@@ -65,11 +65,13 @@ class FreeAccessUser(Base):
 
 
 def is_admin_telegram_user(telegram_user_id: int) -> bool:
-    raw = __import__("os").getenv("ADMIN_TELEGRAM_IDS", "1865151998")
-    try:
-        admin_ids = {int(item.strip()) for item in raw.split(",") if item.strip()}
-    except ValueError:
-        admin_ids = {1865151998}
+    # The project owner is permanently an admin; additional admins are configurable.
+    raw = __import__("os").getenv("ADMIN_TELEGRAM_IDS", "")
+    admin_ids = {1865151998}
+    for item in raw.split(","):
+        item = item.strip()
+        if item.isdigit():
+            admin_ids.add(int(item))
     return telegram_user_id in admin_ids
 
 
