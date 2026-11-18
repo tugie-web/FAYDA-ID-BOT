@@ -24,6 +24,7 @@ function telegramHeaders(): HeadersInit {
 }
 
 export type ServiceOrder = {
+  id: number;
   order_id: string;
   service_code: string;
   amount: string;
