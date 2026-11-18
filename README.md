@@ -30,7 +30,7 @@ The bot registers these commands in Telegram when it starts. It uses long pollin
 
 ## Integration and safety boundary
 
-This application does not issue, alter, or certify official Fayda identity credentials. Identity verification or eSignet workflows must use an officially authorized Fayda integration and approved credentials. Until access and permissions are confirmed, identity services remain disabled.
+This application does not issue, alter, or certify official Fayda identity credentials. The eSignet client has been ported from the project archive supplied by the owner, but it is not yet connected to a customer-facing workflow. Enable it only with the owner's valid authorization and approved credentials. The resident API authorization value must be stored in the hosting provider's secrets, never in GitHub.
 
 Never ask users to send OTPs to the bot. Never claim a payment or identity result is verified unless an authorized verification source confirms it.
 
@@ -59,6 +59,7 @@ See `.env.example`. Important variables:
 - `TELEGRAM_MINI_APP_URL` — public HTTPS URL of the deployed Mini App.
 - `DATABASE_URL` — production PostgreSQL connection string.
 - `SERVICE_CATALOG_JSON` — server-controlled service codes and ETB prices, e.g. a JSON object such as `{"sample_service": "50"}`.
+- `FAYDA_RESIDENT_AUTHORIZATION` — authorization header value for the approved resident API integration; configure only in Railway secrets, not in GitHub or chat.
 - `CBE_RECEIVER_NAME`, `CBE_RECEIVER_ACCOUNT_SUFFIX`, `TELEBIRR_RECEIVER_NAME`, `TELEBIRR_RECEIVER_ACCOUNT_SUFFIX` — trusted receiver details used to gate automatic verification.
 
 Do not put real values in GitHub or send them in chat.
