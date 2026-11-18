@@ -259,6 +259,18 @@ class EsignetClient:
             raise EsignetError("BAD_IDENTITY", "Fayda returned an unexpected identity response.")
         return result
 
+    def retrieve_identity(self) -> dict:
+        """Complete the resident identity exchange after successful OTP verification.
+
+        Check the operator credential before consuming an authorization code. This keeps
+        the already-working FAN/OTP sequence independent from resident API configuration.
+        """
+        self._resident_headers()  # Fail before requesting a one-time authorization code.
+        auth_code = self.get_auth_code()
+        self.exchange_auth_code(auth_code)
+        raw_identity = self.get_identity()
+        return self.parse_identity(raw_identity, self.fan)
+
     @staticmethod
     def parse_identity(raw: dict, fan: str) -> dict:
         """Normalize the eSignet response for the legacy card renderer."""
