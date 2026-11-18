@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 
@@ -18,6 +19,7 @@ from sqlalchemy.exc import IntegrityError
 
 from app.database import SessionLocal
 from app.models import FreeAccessUser, is_admin_telegram_user
+from app.services.esignet import EsignetClient, EsignetError
 
 logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
@@ -63,11 +65,93 @@ async def begin_fayda_flow(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     if not query:
         return
     await query.answer()
+    context.user_data["identity_flow_stage"] = "awaiting_fan"
     await query.message.reply_text(
-        "You are ready to begin the Fayda ID process.\n\n"
-        "FAN entry will be the next step. The secure Fayda connection is not active yet, "
-        "so please do not send your FAN until the bot confirms that the service is ready."
+        "Please enter your FAN (Fayda Identification Number).\n\n"
+        "Your FAN is used only to start the secure Fayda verification process."
     )
+
+
+async def receive_fan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    message = update.effective_message
+    user = update.effective_user
+    if not message or not user:
+        return
+    fan = (message.text or "").strip()
+    if not fan or len(fan) > 64:
+        await message.reply_text("Please enter a valid FAN.")
+        return
+
+    client = EsignetClient()
+    try:
+        await message.reply_text("Connecting securely to Fayda and requesting your OTP. Please wait…")
+        await asyncio.to_thread(client.initialize, fan)
+        await asyncio.to_thread(client.get_oauth_details)
+        masked = await asyncio.to_thread(client.send_otp)
+        clients = context.application.bot_data.setdefault("esignet_clients", {})
+        previous = clients.pop(user.id, None)
+        if previous:
+            previous.close()
+        clients[user.id] = client
+        context.user_data["identity_flow_stage"] = "awaiting_otp"
+        destination = masked.get("maskedMobile") or masked.get("maskedEmail")
+        suffix = f"\nOTP destination: {destination}" if destination else ""
+        await message.reply_text("OTP request successful. Please enter the OTP sent by Fayda." + suffix)
+    except EsignetError as exc:
+        client.close()
+        context.user_data.pop("identity_flow_stage", None)
+        await message.reply_text(
+            "Fayda could not start the OTP process. Please check the FAN and try again. "
+            f"Reference: {exc.code}"
+        )
+    except Exception:
+        client.close()
+        context.user_data.pop("identity_flow_stage", None)
+        logger.warning("Fayda OTP request failed; sensitive request details are omitted.")
+        await message.reply_text(
+            "We could not contact Fayda right now. Please try again later. No payment was taken."
+        )
+
+
+async def receive_otp(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    message = update.effective_message
+    user = update.effective_user
+    if not message or not user:
+        return
+    otp = (message.text or "").strip()
+    clients = context.application.bot_data.setdefault("esignet_clients", {})
+    client = clients.get(user.id)
+    if client is None:
+        context.user_data.pop("identity_flow_stage", None)
+        await message.reply_text("Your Fayda session expired. Please tap Start and enter your FAN again.")
+        return
+    try:
+        await message.reply_text("Verifying your OTP with Fayda. Please wait…")
+        await asyncio.to_thread(client.verify_otp, otp)
+        context.user_data["identity_flow_stage"] = "otp_verified"
+        await message.reply_text(
+            "OTP verified successfully. The identity retrieval and document-delivery steps "
+            "are not yet connected, so no file can be generated in this version."
+        )
+    except EsignetError as exc:
+        await message.reply_text(
+            "Fayda did not accept that OTP. Please check it and try again. "
+            f"Reference: {exc.code}"
+        )
+    except Exception:
+        logger.warning("Fayda OTP verification failed; sensitive request details are omitted.")
+        await message.reply_text("We could not verify the OTP right now. Please try again later.")
+
+
+async def receive_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    stage = context.user_data.get("identity_flow_stage")
+    if stage == "awaiting_fan":
+        await receive_fan(update, context)
+        return
+    if stage == "awaiting_otp":
+        await receive_otp(update, context)
+        return
+    await receive_free_user_id(update, context)
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -188,7 +272,7 @@ def main() -> None:
     application.add_handler(CommandHandler("freeusers", freeusers_command))
     application.add_handler(CommandHandler("revokefree", revokefree_command))
     application.add_handler(CallbackQueryHandler(free_access_button, pattern="^free_access_add$"))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, receive_free_user_id))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, receive_text))
     logger.info("Starting FAYDA ID Telegram bot using long polling.")
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 
