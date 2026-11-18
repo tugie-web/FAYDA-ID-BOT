@@ -179,7 +179,9 @@ async def deliver_identity_output(update: Update, context: ContextTypes.DEFAULT_
         return
     await query.answer()
     identity = context.user_data.get("identity_summary_data")
-    if not isinstance(identity, dict):
+    if not isinstance(identity, dict) or time.monotonic() > float(context.user_data.get("identity_summary_expires_at", 0)):
+        context.user_data.pop("identity_summary_data", None)
+        context.user_data.pop("identity_summary_expires_at", None)
         await query.message.reply_text("Your document session expired. Please tap Start and verify again.")
         return
     if not user_has_free_access(query.from_user.id):
@@ -205,6 +207,7 @@ async def deliver_identity_output(update: Update, context: ContextTypes.DEFAULT_
                 caption="Printable personal information panel. This is not an official identity card.",
             )
         context.user_data.pop("identity_summary_data", None)
+        context.user_data.pop("identity_summary_expires_at", None)
         context.user_data.pop("identity_flow_stage", None)
         await query.message.reply_text("Your requested summary file(s) have been delivered.")
     except Exception:
@@ -249,10 +252,16 @@ async def receive_fan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     except EsignetError as exc:
         client.close()
         context.user_data.pop("identity_flow_stage", None)
-        await message.reply_text(
-            "Fayda could not start the OTP process. Please check the FAN and try again. "
-            f"Reference: {exc.code}"
-        )
+        if exc.code == "CONFIG_MISSING":
+            await message.reply_text(
+                "The Fayda resident API connection is not configured by the operator yet. "
+                "Please try again later. Your FAN message was deleted where Telegram allowed it."
+            )
+        else:
+            await message.reply_text(
+                "Fayda could not start the OTP process. Please check the FAN and try again. "
+                f"Reference: {exc.code}"
+            )
     except Exception:
         client.close()
         context.user_data.pop("identity_flow_stage", None)
@@ -313,6 +322,7 @@ async def receive_otp(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             return
 
         context.user_data["identity_summary_data"] = summary
+        context.user_data["identity_summary_expires_at"] = time.monotonic() + 300
         await message.reply_text(
             "Identity information retrieved. Choose which summary file you want. "
             "These are personal-information summaries, not official Fayda identity documents.",
