@@ -15,30 +15,28 @@ This application does not issue, alter, or certify official Fayda identity crede
 
 ## Security
 - Never commit tokens, API credentials, signing keys, OTPs, or customer identity data.
-- Validate Telegram Mini App initData on the server.
+- Validate Telegram Mini App initData on the server before accepting customer actions.
 - Never log or store OTP values in plaintext.
-- Verify payment webhooks server-side; screenshots are not proof of payment.
+- Verify payment references server-side; screenshots are not proof of payment.
 - Use least-privilege admin roles, audit logs, rate limits, and data-retention rules.
 
-## Payment verification foundation
+## Payment verification and persistence
 
-The backend includes a provider-specific Cheki verification service for:
-- CBE Bank (Cheki bank code: `cbe`)
-- Telebirr (Cheki bank code: `telebirr`)
+The backend includes a provider-specific Cheki verification service for CBE Bank (`cbe`) and Telebirr (`telebirr`). The persistence layer also recognizes CBE Birr (`cbebirr`) as a payment choice, but automatic Cheki verification for that provider is not enabled yet; keep it in manual review until its exact API support is confirmed.
 
-The service checks the provider returned by Cheki, `verified: true`, the exact ETB amount, and optional configured merchant receiver details. A mismatched provider or amount is rejected. API outages, rate limits, and unconfirmed receipts go to manual review; they never authorize service activation.
+The database layer stores orders and payment submissions, enforces a UNIQUE constraint on `(provider, transaction_reference)`, and records verification source and manual-review audit details. An order is marked paid only after Cheki returns `verified: true` with matching provider, amount, and currency, or after an authorized admin explicitly approves it through the internal review function.
 
-This is currently a verification module, not a complete checkout or payment activation workflow. Before launch, connect it to payment/order records and an admin review screen. Enforce a database UNIQUE constraint on provider + transaction reference, atomically claim each reference, and activate a paid order only after verification succeeds. Configure the expected merchant receiver details from trusted deployment settings, not user input. Never store payment credentials or customer secrets in this public repository.
+These are backend building blocks, not public payment endpoints. Do not expose order/payment operations until Telegram Mini App identity validation, customer ownership checks, and admin authorization are implemented. Configure PostgreSQL through `DATABASE_URL`; SQLite is only a local development fallback. Apply schema migrations before production deployment.
 
-Cheki API contract: https://cheki.et/docs. Cheki states that only `verified: true` means the bank's own record confirmed the receipt; HTTP 200 or `success: true` alone is not enough. The hosted API is rate-limited and may be unavailable for some providers from some server regions, so retain manual review as a fallback.
+Cheki API contract: https://cheki.et/docs. Its hosted API is rate-limited and may be unavailable for some providers from some server regions, so manual review remains a fallback. Never treat HTTP 200, a transaction-ID format, or a screenshot alone as proof.
 
 ## Layout
-- backend/: FastAPI service
+- backend/: FastAPI service and database layer
 - frontend/: React + TypeScript Mini App
 - .env.example: placeholders only; copy locally to .env
 
 ## Local development
-Backend: cd backend, install requirements.txt, then run uvicorn app.main:app --reload.
-Frontend: cd frontend, run npm install, then npm run dev.
+Backend: `cd backend`, install `requirements.txt`, then run `uvicorn app.main:app --reload`.
+Frontend: `cd frontend`, run `npm install`, then `npm run dev`.
 
-The first release is a safe foundation with a health endpoint and a bilingual landing screen. Real identity and payment integrations are not enabled until authorization and provider details are confirmed.
+The first release remains a safe foundation. Real identity and payment integrations are not enabled until authorization, provider details, and secure user/admin flows are confirmed.
