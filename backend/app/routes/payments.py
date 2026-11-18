@@ -51,6 +51,7 @@ class SubmitPaymentRequest(BaseModel):
 
 def order_payload(order: Order) -> dict:
     return {
+        "id": order.id,
         "order_id": order.public_id,
         "service_code": order.service_code,
         "amount": str(order.amount),
@@ -124,6 +125,19 @@ async def submit_customer_payment(
     else:
         expected_name = os.getenv(f"{body.provider.upper()}_RECEIVER_NAME") or None
         expected_suffix = os.getenv(f"{body.provider.upper()}_RECEIVER_ACCOUNT_SUFFIX") or None
+        if not expected_name or not expected_suffix:
+            payment.status = "manual_review"
+            payment.verification_source = "manual"
+            payment.verification_reason = "Trusted merchant receiver details are not configured."
+            db.commit()
+            db.refresh(payment)
+            return {
+                "payment_id": payment.id,
+                "order_id": order.public_id,
+                "provider": payment.provider,
+                "status": payment.status,
+                "message": "Payment submitted for manual review.",
+            }
         result = await verify_payment(
             provider=PaymentProvider(body.provider),
             reference=payment.transaction_reference,
