@@ -4,11 +4,13 @@ import asyncio
 import logging
 import os
 import time
+from io import BytesIO
 
 from telegram import (
     BotCommand,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
+    InputFile,
     Update,
     WebAppInfo,
 )
@@ -19,8 +21,9 @@ from telegram.ext import (
 from sqlalchemy.exc import IntegrityError
 
 from app.database import SessionLocal
-from app.models import FreeAccessUser, is_admin_telegram_user
+from app.models import FreeAccessUser, has_free_access, is_admin_telegram_user
 from app.services.esignet import EsignetClient, EsignetError
+from app.services.identity_documents import render_identity_pdf, render_printable_summary_png
 
 logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
@@ -55,7 +58,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     message = (
         "Welcome to FAYDA ID BOT.\n\n"
         "Tap Start to begin. The next step will be FAN entry, followed by the OTP process.\n"
-        "The secure identity workflow is still being connected, so please do not send your FAN yet."
+        "Only enter your FAN after tapping Start. Your FAN and OTP are sensitive; the bot will try to delete your messages after receiving them."
     )
     if update.effective_message:
         await update.effective_message.reply_text(message, reply_markup=keyboard)
@@ -112,6 +115,7 @@ async def resend_fayda_otp(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         result = await asyncio.to_thread(client.send_otp)
         context.user_data["otp_resend_count"] = resend_count + 1
         context.user_data["otp_resend_after"] = time.monotonic() + 60
+        context.user_data["identity_session_expires_at"] = time.monotonic() + 600
         destination = result.get("maskedMobile") or result.get("maskedEmail")
         suffix = f"\nOTP destination: {destination}" if destination else ""
         await query.message.reply_text(
@@ -132,6 +136,74 @@ async def resend_fayda_otp(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         )
 
 
+def user_has_free_access(telegram_user_id: int) -> bool:
+    if is_admin_telegram_user(telegram_user_id):
+        return True
+    db = SessionLocal()
+    try:
+        return has_free_access(db, telegram_user_id)
+    except Exception:
+        logger.warning("Could not check free-access status; access is denied.")
+        return False
+    finally:
+        db.close()
+
+
+async def delete_sensitive_message(message) -> None:
+    try:
+        await message.delete()
+    except Exception:
+        # Telegram may reject deletion due to chat or message permissions.
+        pass
+
+
+def identity_output_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("PDF summary", callback_data="identity_pdf")],
+        [InlineKeyboardButton("Printable summary", callback_data="identity_print")],
+        [InlineKeyboardButton("Both files", callback_data="identity_both")],
+    ])
+
+
+async def deliver_identity_output(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if not query:
+        return
+    await query.answer()
+    identity = context.user_data.get("identity_summary_data")
+    if not isinstance(identity, dict):
+        await query.message.reply_text("Your document session expired. Please tap Start and verify again.")
+        return
+    if not user_has_free_access(query.from_user.id):
+        context.user_data.pop("identity_summary_data", None)
+        await query.message.reply_text(
+            "Document delivery requires wallet payment. Wallet charging is not enabled yet, "
+            "so no paid file has been delivered and no charge has been taken."
+        )
+        return
+
+    choice = query.data
+    try:
+        if choice in ("identity_pdf", "identity_both"):
+            pdf_bytes = await asyncio.to_thread(render_identity_pdf, identity)
+            await query.message.reply_document(
+                document=InputFile(BytesIO(pdf_bytes), filename="identity-information-summary.pdf"),
+                caption="Personal identity information summary. This is not an official identity document.",
+            )
+        if choice in ("identity_print", "identity_both"):
+            png_bytes = await asyncio.to_thread(render_printable_summary_png, identity)
+            await query.message.reply_document(
+                document=InputFile(BytesIO(png_bytes), filename="printable-identity-summary.png"),
+                caption="Printable personal information panel. This is not an official identity card.",
+            )
+        context.user_data.pop("identity_summary_data", None)
+        context.user_data.pop("identity_flow_stage", None)
+        await query.message.reply_text("Your requested summary file(s) have been delivered.")
+    except Exception:
+        logger.warning("Identity summary generation or delivery failed; personal data omitted.")
+        await query.message.reply_text("We could not create or deliver the summary. No payment was taken.")
+
+
 async def receive_fan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     message = update.effective_message
     user = update.effective_user
@@ -144,6 +216,8 @@ async def receive_fan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
     client = EsignetClient()
     try:
+        client.check_configuration()
+        await delete_sensitive_message(message)
         await message.reply_text("Connecting securely to Fayda and requesting your OTP. Please wait…")
         await asyncio.to_thread(client.initialize, fan)
         await asyncio.to_thread(client.get_oauth_details)
@@ -185,6 +259,14 @@ async def receive_otp(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     if not message or not user:
         return
     otp = (message.text or "").strip()
+    await delete_sensitive_message(message)
+    if time.monotonic() > float(context.user_data.get("identity_session_expires_at", 0)):
+        stale = context.application.bot_data.setdefault("esignet_clients", {}).pop(user.id, None)
+        if stale:
+            stale.close()
+        context.user_data.pop("identity_flow_stage", None)
+        await message.reply_text("Your Fayda session expired. Please tap Start and begin again.")
+        return
     clients = context.application.bot_data.setdefault("esignet_clients", {})
     client = clients.get(user.id)
     if client is None:
@@ -194,10 +276,35 @@ async def receive_otp(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     try:
         await message.reply_text("Verifying your OTP with Fayda. Please wait…")
         await asyncio.to_thread(client.verify_otp, otp)
-        context.user_data["identity_flow_stage"] = "otp_verified"
+        await message.reply_text("OTP verified. Retrieving your identity information securely…")
+        auth_code = await asyncio.to_thread(client.get_auth_code)
+        await asyncio.to_thread(client.exchange_auth_code, auth_code)
+        raw_identity = await asyncio.to_thread(client.get_identity)
+        identity = await asyncio.to_thread(client.parse_identity, raw_identity, client.fan)
+
+        # Keep only the fields needed for the requested summary; never retain photo or tokens.
+        summary = {
+            key: identity.get(key)
+            for key in ("fullName", "dateOfBirth", "gender", "phone", "uin",
+                        "region", "zone", "woreda", "residenceStatus", "email")
+        }
+        clients.pop(user.id, None)
+        client.close()
+        context.user_data.pop("identity_flow_stage", None)
+        context.user_data.pop("identity_session_expires_at", None)
+
+        if not user_has_free_access(user.id):
+            await message.reply_text(
+                "Your identity information was retrieved successfully. Document delivery is a paid service, "
+                "but wallet charging is not enabled yet. No file was delivered and no payment was taken."
+            )
+            return
+
+        context.user_data["identity_summary_data"] = summary
         await message.reply_text(
-            "OTP verified successfully. The identity retrieval and document-delivery steps "
-            "are not yet connected, so no file can be generated in this version."
+            "Identity information retrieved. Choose which summary file you want. "
+            "These are personal-information summaries, not official Fayda identity documents.",
+            reply_markup=identity_output_keyboard(),
         )
     except EsignetError as exc:
         await message.reply_text(
@@ -335,6 +442,7 @@ def main() -> None:
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CallbackQueryHandler(begin_fayda_flow, pattern="^begin_fayda_flow$"))
     application.add_handler(CallbackQueryHandler(resend_fayda_otp, pattern="^resend_fayda_otp$"))
+    application.add_handler(CallbackQueryHandler(deliver_identity_output, pattern="^identity_(pdf|print|both)$"))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("admin", admin_command))
     application.add_handler(CommandHandler("freeusers", freeusers_command))
