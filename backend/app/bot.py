@@ -3,7 +3,13 @@ from __future__ import annotations
 import logging
 import os
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, WebAppInfo
+from telegram import (
+    BotCommand,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Update,
+    WebAppInfo,
+)
 from telegram.ext import Application, CommandHandler, ContextTypes
 
 logging.basicConfig(
@@ -13,6 +19,15 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+async def post_init(application: Application) -> None:
+    await application.bot.set_my_commands(
+        [
+            BotCommand("start", "Open FAYDA ID BOT"),
+            BotCommand("help", "Show help and available commands"),
+        ]
+    )
+
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     mini_app_url = os.getenv("TELEGRAM_MINI_APP_URL", "").strip()
     keyboard = None
@@ -20,12 +35,18 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         keyboard = InlineKeyboardMarkup(
             [[InlineKeyboardButton("Open FAYDA ID", web_app=WebAppInfo(url=mini_app_url))]]
         )
+        message = (
+            "Welcome to FAYDA ID BOT.\n\n"
+            "Tap the button below to open the Mini App and explore available services.\n"
+            "Identity services remain unavailable until an authorized official integration is configured."
+        )
+    else:
+        message = (
+            "Welcome to FAYDA ID BOT.\n\n"
+            "The Mini App is not configured yet. Please try again later.\n"
+            "Identity services remain unavailable until an authorized official integration is configured."
+        )
 
-    message = (
-        "Welcome to FAYDA ID BOT.\n\n"
-        "Use the button below to open the Mini App and explore the available services.\n"
-        "Identity services are not active until an authorized official integration is configured."
-    )
     if update.effective_message:
         await update.effective_message.reply_text(message, reply_markup=keyboard)
 
@@ -33,9 +54,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if update.effective_message:
         await update.effective_message.reply_text(
-            "Available commands:\n"
-            "/start — open the FAYDA ID welcome screen\n"
-            "/help — show this help message"
+            "FAYDA ID BOT help\n\n"
+            "/start — open the welcome screen and Mini App\n"
+            "/help — show this help message\n\n"
+            "For account or payment questions, use the support option in the Mini App "
+            "when it becomes available."
         )
 
 
@@ -44,7 +67,12 @@ def main() -> None:
     if not token:
         raise RuntimeError("TELEGRAM_BOT_TOKEN is required to run the Telegram bot.")
 
-    application = Application.builder().token(token).build()
+    application = (
+        Application.builder()
+        .token(token)
+        .post_init(post_init)
+        .build()
+    )
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
 
