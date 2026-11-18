@@ -226,12 +226,16 @@ async def receive_fan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         return
 
     client = EsignetClient()
+    step = "configuration"
     try:
         await delete_sensitive_message(message)
         client.check_configuration()
         await message.reply_text("Connecting securely to Fayda and requesting your OTP. Please wait…")
+        step = "CSRF initialization"
         await asyncio.to_thread(client.initialize, fan)
+        step = "OAuth authorization details"
         await asyncio.to_thread(client.get_oauth_details)
+        step = "OTP request"
         masked = await asyncio.to_thread(client.send_otp)
         clients = context.application.bot_data.setdefault("esignet_clients", {})
         previous = clients.pop(user.id, None)
@@ -262,10 +266,16 @@ async def receive_fan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
                 "Fayda could not start the OTP process. Please check the FAN and try again. "
                 f"Reference: {exc.code}"
             )
-    except Exception:
+    except Exception as exc:
         client.close()
         context.user_data.pop("identity_flow_stage", None)
-        logger.warning("Fayda OTP request failed; sensitive request details are omitted.")
+        response = getattr(exc, "response", None)
+        status_code = getattr(response, "status_code", None)
+        logger.exception(
+            "Fayda OTP request failed at step=%s exception_type=%s http_status=%s; "
+            "FAN and request payload are intentionally omitted.",
+            step, type(exc).__name__, status_code,
+        )
         await message.reply_text(
             "We could not contact Fayda right now. Please try again later. No payment was taken."
         )
