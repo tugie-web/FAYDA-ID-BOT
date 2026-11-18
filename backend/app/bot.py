@@ -377,7 +377,6 @@ def _probe_fayda_connection() -> str:
     """Test DNS, TCP/TLS, and the public CSRF endpoint without using FAN or credentials."""
     import socket
     import ssl
-    from urllib.parse import urlparse
 
     host = "auth.fayda.et"
     lines = []
@@ -394,7 +393,7 @@ def _probe_fayda_connection() -> str:
                 lines.append("TLS: OK (" + secure.version() + ")")
     except Exception as exc:
         lines.append("TLS: FAILED (" + type(exc).__name__ + ")")
-        return "\\n".join(lines)
+        return "\n".join(lines)
 
     try:
         started = time.monotonic()
@@ -409,7 +408,7 @@ def _probe_fayda_connection() -> str:
         lines.append("Response body/token: not displayed")
     except Exception as exc:
         lines.append("CSRF HTTP: FAILED (" + type(exc).__name__ + ")")
-    return "\\n".join(lines)
+    return "\n".join(lines)
 
 
 async def fayda_test_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -422,7 +421,7 @@ async def fayda_test_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
         result = await asyncio.to_thread(_probe_fayda_connection)
     except Exception as exc:
         result = "Diagnostic failed safely: " + type(exc).__name__
-    await update.effective_message.reply_text("Fayda connection test:\\n" + result)
+    await update.effective_message.reply_text("Fayda connection test:\n" + result)
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -431,6 +430,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             "FAYDA ID BOT help\n\n"
             "/start — open the welcome screen and Mini App\n"
             "/help — show this help message\n"
+            "/fayda_test — test the Fayda connection (admin only)\n"
             "/admin — administrator controls (admin only)\n\n"
             "For account or payment questions, use the support option in the Mini App."
         )
