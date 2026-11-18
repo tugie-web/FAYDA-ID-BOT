@@ -1,20 +1,35 @@
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from app.database import Base, engine
+from app import models  # noqa: F401 - registers ORM models with Base.metadata
+from app.routes.payments import router as payments_router
 
 
 class Settings(BaseSettings):
     app_name: str = "FAYDA ID BOT"
     app_env: str = "development"
     frontend_origin: str = "http://localhost:5173"
-
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 
 settings = Settings()
-app = FastAPI(title=settings.app_name, version="0.1.0")
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    # Convenient for local development. Production schema changes must use migrations.
+    if settings.app_env.lower() != "production":
+        Base.metadata.create_all(bind=engine)
+    yield
+
+
+app = FastAPI(title=settings.app_name, version="0.2.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[settings.frontend_origin],
@@ -22,6 +37,7 @@ app.add_middleware(
     allow_methods=["GET", "POST"],
     allow_headers=["Content-Type", "Authorization"],
 )
+app.include_router(payments_router)
 
 
 @app.get("/health", tags=["system"])
@@ -34,7 +50,7 @@ async def status() -> dict[str, str]:
     return {
         "name": settings.app_name,
         "environment": settings.app_env,
-        "mode": "foundation",
+        "mode": "payment_api_foundation",
         "identity_integration": "disabled_until_authorized",
-        "payments": "not_configured",
+        "payments": "customer_api_available_when_configured",
     }
