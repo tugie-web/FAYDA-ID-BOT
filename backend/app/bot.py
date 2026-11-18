@@ -69,6 +69,7 @@ async def begin_fayda_flow(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     if not query:
         return
     await query.answer()
+    context.user_data.pop("identity_summary_data", None)
     context.user_data["identity_flow_stage"] = "awaiting_fan"
     await query.message.reply_text(
         "Please enter your FAN (Fayda Identification Number).\n\n"
@@ -89,6 +90,14 @@ async def resend_fayda_otp(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     user_id = query.from_user.id
     if context.user_data.get("identity_flow_stage") != "awaiting_otp":
         await query.answer("Start a new Fayda request first.", show_alert=True)
+        return
+
+    if time.monotonic() > float(context.user_data.get("identity_session_expires_at", 0)):
+        stale = context.application.bot_data.setdefault("esignet_clients", {}).pop(user_id, None)
+        if stale:
+            stale.close()
+        context.user_data.pop("identity_flow_stage", None)
+        await query.answer("Your Fayda session expired. Please start again.", show_alert=True)
         return
 
     clients = context.application.bot_data.setdefault("esignet_clients", {})
@@ -115,7 +124,6 @@ async def resend_fayda_otp(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         result = await asyncio.to_thread(client.send_otp)
         context.user_data["otp_resend_count"] = resend_count + 1
         context.user_data["otp_resend_after"] = time.monotonic() + 60
-        context.user_data["identity_session_expires_at"] = time.monotonic() + 600
         destination = result.get("maskedMobile") or result.get("maskedEmail")
         suffix = f"\nOTP destination: {destination}" if destination else ""
         await query.message.reply_text(
@@ -216,8 +224,8 @@ async def receive_fan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
     client = EsignetClient()
     try:
-        client.check_configuration()
         await delete_sensitive_message(message)
+        client.check_configuration()
         await message.reply_text("Connecting securely to Fayda and requesting your OTP. Please wait…")
         await asyncio.to_thread(client.initialize, fan)
         await asyncio.to_thread(client.get_oauth_details)
@@ -230,6 +238,7 @@ async def receive_fan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         context.user_data["identity_flow_stage"] = "awaiting_otp"
         context.user_data["otp_resend_count"] = 0
         context.user_data["otp_resend_after"] = time.monotonic() + 60
+        context.user_data["identity_session_expires_at"] = time.monotonic() + 600
         destination = masked.get("maskedMobile") or masked.get("maskedEmail")
         suffix = f"\nOTP destination: {destination}" if destination else ""
         await message.reply_text(
@@ -273,9 +282,12 @@ async def receive_otp(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         context.user_data.pop("identity_flow_stage", None)
         await message.reply_text("Your Fayda session expired. Please tap Start and enter your FAN again.")
         return
+    otp_verified = False
     try:
         await message.reply_text("Verifying your OTP with Fayda. Please wait…")
         await asyncio.to_thread(client.verify_otp, otp)
+        otp_verified = True
+        context.user_data["identity_flow_stage"] = "retrieving_identity"
         await message.reply_text("OTP verified. Retrieving your identity information securely…")
         auth_code = await asyncio.to_thread(client.get_auth_code)
         await asyncio.to_thread(client.exchange_auth_code, auth_code)
@@ -307,14 +319,29 @@ async def receive_otp(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             reply_markup=identity_output_keyboard(),
         )
     except EsignetError as exc:
-        await message.reply_text(
-            "Fayda did not accept that OTP. Please check it and try again, or request a new OTP. "
-            f"Reference: {exc.code}",
-            reply_markup=otp_keyboard(),
-        )
+        if otp_verified:
+            clients.pop(user.id, None)
+            client.close()
+            context.user_data.pop("identity_flow_stage", None)
+            context.user_data.pop("identity_session_expires_at", None)
+            await message.reply_text(
+                "OTP was accepted, but Fayda could not return the identity information. "
+                "Please tap Start and try again. Reference: " + exc.code
+            )
+        else:
+            await message.reply_text(
+                "Fayda did not accept that OTP. Please check it and try again, or request a new OTP. "
+                f"Reference: {exc.code}",
+                reply_markup=otp_keyboard(),
+            )
     except Exception:
-        logger.warning("Fayda OTP verification failed; sensitive request details are omitted.")
-        await message.reply_text("We could not verify the OTP right now. Please try again later.")
+        if otp_verified:
+            clients.pop(user.id, None)
+            client.close()
+            context.user_data.pop("identity_flow_stage", None)
+            context.user_data.pop("identity_session_expires_at", None)
+        logger.warning("Fayda identity retrieval failed; sensitive request details are omitted.")
+        await message.reply_text("We could not complete the Fayda request. Please try again later.")
 
 
 async def receive_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
