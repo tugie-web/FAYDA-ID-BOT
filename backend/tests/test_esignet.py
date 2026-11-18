@@ -33,3 +33,33 @@ def test_resident_authorization_must_be_configured(monkeypatch):
         assert exc.code == "CONFIG_MISSING"
     else:
         raise AssertionError("Missing resident authorization must fail closed.")
+
+
+def test_retrieve_identity_checks_resident_configuration_before_auth_code(monkeypatch):
+    monkeypatch.delenv("FAYDA_RESIDENT_AUTHORIZATION", raising=False)
+    client = EsignetClient()
+    called = []
+    monkeypatch.setattr(client, "get_auth_code", lambda: called.append("auth_code") or "code")
+    try:
+        client.retrieve_identity()
+    except EsignetError as exc:
+        assert exc.code == "CONFIG_MISSING"
+    else:
+        raise AssertionError("Missing resident authorization must fail closed.")
+    assert called == []
+
+
+def test_retrieve_identity_runs_resident_exchange_after_configuration(monkeypatch):
+    monkeypatch.setenv("FAYDA_RESIDENT_AUTHORIZATION", "Basic test-only")
+    client = EsignetClient()
+    client.fan = "FAN-TEST"
+    calls = []
+    monkeypatch.setattr(client, "get_auth_code", lambda: calls.append("auth_code") or "one-time-code")
+    monkeypatch.setattr(client, "exchange_auth_code", lambda code: calls.append(("exchange", code)))
+    monkeypatch.setattr(client, "get_identity", lambda: calls.append("identity") or {
+        "data": {"identity": {"UIN": "123456789012", "fullName": "Example Person"}}
+    })
+    result = client.retrieve_identity()
+    assert calls == ["auth_code", ("exchange", "one-time-code"), "identity"]
+    assert result["uin"] == "123456789012"
+    assert result["fullName"]["eng"] == "Example Person"
