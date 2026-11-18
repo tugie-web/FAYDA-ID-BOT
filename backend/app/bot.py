@@ -383,14 +383,18 @@ async def receive_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 
 def _probe_fayda_connection() -> str:
-    """Test DNS, TCP/TLS, and the public CSRF endpoint without using FAN or credentials."""
+    """Test DNS, TLS, and Fayda's public CSRF endpoint without FAN or credentials."""
     import socket
     import ssl
+    import requests
 
     host = "auth.fayda.et"
     lines = []
     try:
-        addresses = sorted({item[4][0] for item in socket.getaddrinfo(host, 443, type=socket.SOCK_STREAM)})
+        addresses = sorted({
+            item[4][0]
+            for item in socket.getaddrinfo(host, 443, type=socket.SOCK_STREAM)
+        })
         lines.append("DNS: OK (" + ", ".join(addresses[:4]) + ")")
     except Exception as exc:
         return "DNS: FAILED (" + type(exc).__name__ + ")"
@@ -402,14 +406,16 @@ def _probe_fayda_connection() -> str:
                 lines.append("TLS: OK (" + secure.version() + ")")
     except Exception as exc:
         lines.append("TLS: FAILED (" + type(exc).__name__ + ")")
-        return "
-".join(lines)
+        return "\\n".join(lines)
 
     try:
         started = time.monotonic()
         response = requests.get(
             "https://auth.fayda.et/v1/esignet/csrf/token",
-            headers={"User-Agent": "FAYDA-ID-BOT connectivity check", "Accept": "application/xml, text/xml, */*"},
+            headers={
+                "User-Agent": "FAYDA-ID-BOT connectivity check",
+                "Accept": "application/xml, text/xml, */*",
+            },
             timeout=(7, 12),
         )
         elapsed = round(time.monotonic() - started, 2)
@@ -418,8 +424,7 @@ def _probe_fayda_connection() -> str:
         lines.append("Response body/token: not displayed")
     except Exception as exc:
         lines.append("CSRF HTTP: FAILED (" + type(exc).__name__ + ")")
-    return "
-".join(lines)
+    return "\\n".join(lines)
 
 
 async def fayda_test_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -432,25 +437,17 @@ async def fayda_test_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
         result = await asyncio.to_thread(_probe_fayda_connection)
     except Exception as exc:
         result = "Diagnostic failed safely: " + type(exc).__name__
-    await update.effective_message.reply_text("Fayda connection test:
-" + result)
+    await update.effective_message.reply_text("Fayda connection test:\\n" + result)
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if update.effective_message:
         await update.effective_message.reply_text(
-            "FAYDA ID BOT help
-
-"
-            "/start — open the welcome screen and Mini App
-"
-            "/help — show this help message
-"
-            "/fayda_test — test the Fayda connection (admin only)
-"
-            "/admin — administrator controls (admin only)
-
-"
+            "FAYDA ID BOT help\\n\\n"
+            "/start — open the welcome screen and Mini App\\n"
+            "/help — show this help message\\n"
+            "/fayda_test — test the Fayda connection (admin only)\\n"
+            "/admin — administrator controls (admin only)\\n\\n"
             "For account or payment questions, use the support option in the Mini App."
         )
 
