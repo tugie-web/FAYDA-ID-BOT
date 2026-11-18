@@ -50,3 +50,33 @@ class PaymentRecord(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False)
     order: Mapped[Order] = relationship(back_populates="payments")
+
+
+class FreeAccessUser(Base):
+    """Telegram users explicitly allowed to use paid outputs without wallet charges."""
+    __tablename__ = "free_access_users"
+    __table_args__ = (
+        CheckConstraint("telegram_user_id > 0", name="ck_free_access_user_id_positive"),
+    )
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    telegram_user_id: Mapped[int] = mapped_column(Integer, unique=True, nullable=False, index=True)
+    granted_by: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+
+
+def is_admin_telegram_user(telegram_user_id: int) -> bool:
+    raw = __import__("os").getenv("ADMIN_TELEGRAM_IDS", "1865151998")
+    try:
+        admin_ids = {int(item.strip()) for item in raw.split(",") if item.strip()}
+    except ValueError:
+        admin_ids = {1865151998}
+    return telegram_user_id in admin_ids
+
+
+def has_free_access(db, telegram_user_id: int) -> bool:
+    """Admins are always free; other users need an explicit whitelist entry."""
+    if is_admin_telegram_user(telegram_user_id):
+        return True
+    return db.query(FreeAccessUser.id).filter(
+        FreeAccessUser.telegram_user_id == telegram_user_id
+    ).first() is not None
